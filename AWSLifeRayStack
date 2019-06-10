@@ -1,0 +1,134 @@
+ {
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "SC Lab Stack HA Proxy, LifeRay, mySQL",
+  "Parameters": {
+    "DesiredCapacity": {
+      "Type": "String",
+      "Default": "0",
+      "Description": "Number of additional application instances to be provisioned"
+    }
+  },
+  "Outputs": {
+    "PublicURL": {
+      "Value": { "Fn::Join": ["", ["http://", { "Fn::GetAtt": ["LoadBalancerInstance", "PublicIp"] }]]},
+      "Description": "New application external URL"
+    },
+    "PrivateURL": {
+      "Value": { "Fn::Join": ["", ["http://", { "Fn::GetAtt": ["LoadBalancerInstance", "PrivateIp"] }]]},
+      "Description": "New application internal URL (for dependency mapping)"
+    }
+  },
+  "Resources": {
+    "LoadBalancerInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "LoadBalancerInstance"
+          }
+        ],
+        "InstanceType": "t2.micro",
+        "SecurityGroupIds": [
+          "sg-b53aa1d1"
+        ],
+        "KeyName": "JoeEC2Key",
+        "UserData": {
+          "Fn::Base64": { "Fn::Join": ["",
+              [
+                "#!/bin/bash -v\n",
+                "/opt/aws/bin/cfn-init -s ", { "Ref": "AWS::StackName" }, " --region ", { "Ref": "AWS::Region" }, "\n"
+              ]
+          ]}
+        },
+        "AvailabilityZone": "us-east-1c",
+        "SubnetId": "subnet-abf46bdc",
+        "ImageId": "ami-500f3c38"
+      }
+    },
+    "mySQLInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "mySQLInstance"
+          }
+        ],
+        "InstanceType": "t2.micro",
+        "SecurityGroupIds": [
+          "sg-b53aa1d1"
+        ],
+        "KeyName": "JoeEC2Key",
+        "UserData": {
+          "Fn::Base64": { "Fn::Join": ["",
+              [
+                "#!/bin/bash -v\n",
+                "/opt/aws/bin/cfn-init -s ", { "Ref": "AWS::StackName" }, " --region ", { "Ref": "AWS::Region" }, "\n"
+              ]
+          ]}
+        },
+        "AvailabilityZone": "us-east-1c",
+        "SubnetId": "subnet-abf46bdc",
+        "ImageId": "ami-9c3f0ef4"
+      }
+    },
+    "LaunchConfig" : {
+    "Type" : "AWS::AutoScaling::LaunchConfiguration",
+    "Properties" : {
+      "InstanceId": {"Ref": "LifeRayInstance"},
+      "ImageId" : "ami-38675550",
+      "InstanceType" : "t2.small",
+      "InstanceMonitoring": "false"
+      }
+    }, 
+    "LifeRayAutoScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "LifeRayInstance",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "AvailabilityZones": ["us-east-1c"],
+        "LaunchConfigurationName": {"Ref": "LaunchConfig"},
+        "MinSize": "0",
+        "MaxSize": "4",
+        "DesiredCapacity": { "Ref": "DesiredCapacity" },
+        "VPCZoneIdentifier": ["subnet-abf46bdc"]
+      }
+    },
+    "LifeRayInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "LifeRayInstance"
+          }
+        ],
+        "InstanceType": "t2.small",
+        "SecurityGroupIds": [
+          "sg-b53aa1d1"
+        ],
+        "KeyName": "JoeEC2Key",
+        "UserData": {
+          "Fn::Base64": { "Fn::Join": ["",
+              [
+                "#!/bin/bash -v\n",
+                "/opt/aws/bin/cfn-init -s ", { "Ref": "AWS::StackName" }, " --region ", { "Ref": "AWS::Region" }, "\n",
+                "sed -i s/'0.0.0.0'/'", { "Fn::GetAtt": ["mySQLInstance", "PrivateIp"] }, "'/g /opt/liferay/tomcat/webapps/ROOT/WEB-INF/classes/portal-ext.properties\n",
+                "echo 127.0.0.1 `cat /etc/hostname` >> /etc/hosts\n",
+                "ssh -o StrictHostKeyChecking=no ", { "Fn::GetAtt": ["LoadBalancerInstance", "PrivateIp"] }, " \"echo server liferay `hostname -I | tr -d \\\" \\\"`:8080/liferay >> /etc/haproxy/haproxy.cfg; service haproxy restart\""
+              ]
+          ]}
+        },
+        "AvailabilityZone": "us-east-1c",
+        "SubnetId": "subnet-abf46bdc",
+        "ImageId": "ami-38675550"
+      }
+    }
+  }
+}
